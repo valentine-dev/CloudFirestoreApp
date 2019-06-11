@@ -1,4 +1,4 @@
-# CloudFirestoreApp
+# Sample Cloud Firestore Application
 
 A basic REST API to communicate with Cloud Firestore using Java 8 and Spring Boot 2:
 1. Add data
