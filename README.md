@@ -5,3 +5,4 @@ A basic REST API to communicate with Google Cloud Firestore using Java 8 and Spr
 2. Read data
 3. Update data
 4. Delete data (document, field)
+5. Query data using query parameters
