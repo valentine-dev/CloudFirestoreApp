@@ -9,7 +9,7 @@ public class CloudFirestoreAppApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(CloudFirestoreAppApplication.class, args);
 		
-		System.setProperty("https.proxyHost", "198.161.14.25");
+		System.setProperty("https.proxyHost", "your proxy host IP");
 		System.setProperty("https.proxyPort", "8080");
 		System.setProperty("com.google.api.client.should_use_proxy", "true");
 	}
