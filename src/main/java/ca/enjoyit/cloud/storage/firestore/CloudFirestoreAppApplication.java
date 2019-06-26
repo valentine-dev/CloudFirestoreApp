@@ -16,7 +16,7 @@ public class CloudFirestoreAppApplication {
 			"LCA_GOOGLE_APPLICATION_CREDENTIALS",
 			"LCA_LOCAL_CALLING_LOOKUP_FILE",
 			"LCA_LOCAL_CALLING_REPORT_FILE",
-			"LCA_TELUS_CANADA_REPORT_FILE"
+			"LCA_CANADA_CALLING_REPORT_FILE"
 			};
 
 	public static void main(String[] args) {
@@ -38,9 +38,9 @@ public class CloudFirestoreAppApplication {
 		System.setProperty("https.proxyPort", System.getenv("LCA_PROXY_PORT"));
 		System.setProperty("com.google.api.client.should_use_proxy", System.getenv("LCA_GCP_USE_PROXY"));
 		System.setProperty("GOOGLE_APPLICATION_CREDENTIALS", System.getenv("LCA_GOOGLE_APPLICATION_CREDENTIALS"));
-		System.setProperty("com.telus.lca.report.file.localcalling", System.getenv("LCA_LOCAL_CALLING_REPORT_FILE"));
-		System.setProperty("com.telus.lca.report.file.teluscanada", System.getenv("LCA_TELUS_CANADA_REPORT_FILE"));
-		System.setProperty("com.telus.lca.lookup.file.localcalling", System.getenv("LCA_LOCAL_CALLING_LOOKUP_FILE"));
+		System.setProperty("lca.report.file.localcalling", System.getenv("LCA_LOCAL_CALLING_REPORT_FILE"));
+		System.setProperty("lca.report.file.canadacalling", System.getenv("LCA_CANADA_CALLING_REPORT_FILE"));
+		System.setProperty("lca.lookup.file.localcalling", System.getenv("LCA_LOCAL_CALLING_LOOKUP_FILE"));
 	}
 
 }

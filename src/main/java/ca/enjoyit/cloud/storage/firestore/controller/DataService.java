@@ -4,10 +4,8 @@
 package ca.enjoyit.cloud.storage.firestore.controller;
 
 import java.io.BufferedWriter;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
@@ -35,7 +33,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.google.api.core.ApiFuture;
-import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.Timestamp;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
@@ -46,13 +43,10 @@ import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import com.google.cloud.firestore.WriteBatch;
 import com.google.cloud.firestore.WriteResult;
-import com.google.firebase.FirebaseApp;
-import com.google.firebase.FirebaseOptions;
-import com.google.firebase.cloud.FirestoreClient;
 import com.google.gson.GsonBuilder;
 
+import ca.enjoyit.cloud.storage.firestore.data.CanadaCalling;
 import ca.enjoyit.cloud.storage.firestore.data.LocalCalling;
-import ca.enjoyit.cloud.storage.firestore.data.TelusCanada;
 import ca.enjoyit.cloud.storage.firestore.data.User;
 
 /**
@@ -63,36 +57,28 @@ import ca.enjoyit.cloud.storage.firestore.data.User;
 public class DataService {
 	private static final Log log = LogFactory.getLog(DataService.class);
 	private static final int QUERY_PARAMETER_MAX_SIZE = 3;
-
-	private final Map<String, TelusCanada> TELUS_CANADA_RECORDS = new HashMap<>();
-	private final Map<String, LocalCalling> LOCAL_CALLING_RECORDS = new HashMap<>();
-
-	private static final Map<String, String> RATE_CENTER_NAME_MAPPING = new HashMap<>();
+	final Map<String, String> RATE_CENTER_NAME_MAPPING = new HashMap<>();
 
 	@GetMapping("/")
 	public String defaultGreeting() {
 		log.debug("Default greeting");
-
-		String lcLookup = System.getProperty("com.telus.lca.lookup.file.localcalling"); // checked already
-
+		String lcLookup = System.getProperty("lca.lookup.file.localcalling"); // checked already
 		String message = "Greeting: RATE_CENTER_NAME_MAPPING is set!";
-
 		if (RATE_CENTER_NAME_MAPPING.size() > 0) {
 			message = "Greeting: RATE_CENTER_NAME_MAPPING is reset!";
 			RATE_CENTER_NAME_MAPPING.clear();
 		}
-
 		try (Stream<String> stream = Files.lines(Paths.get(lcLookup), StandardCharsets.UTF_8)) {
 			stream.skip(1) // first line is the header -- skip
 					.map(x -> x.split(",")).forEach(x -> {
 						RATE_CENTER_NAME_MAPPING.put(x[0], x[1]);
 					});
-			stream.close();
+			log.debug("Number of rate center name mappings: " + RATE_CENTER_NAME_MAPPING.size());
 		} catch (IOException e) {
 			e.printStackTrace();
+			message = "Greeting: rate center name mappings cannot be read";
+			log.error(message);
 		}
-		log.debug("Number of rate centers reset: " + RATE_CENTER_NAME_MAPPING.size());
-
 		return message;
 	}
 
@@ -100,9 +86,9 @@ public class DataService {
 	public String addLocalCalling() throws InterruptedException, ExecutionException {
 		log.debug("Adding Local Calling");
 
-		LOCAL_CALLING_RECORDS.clear();
+		final Map<String, LocalCalling> localCallingRecords = new HashMap<>();
 		// checked already
-		String inputFile = System.getProperty("com.telus.lca.report.file.localcalling");
+		String inputFile = System.getProperty("lca.report.file.localcalling");
 		String processedFile = inputFile.substring(0, inputFile.length() - 4) + "_processed.csv";
 
 		backupFile(processedFile);
@@ -125,7 +111,7 @@ public class DataService {
 					.map(x -> x.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)", -1)) // https://stackabuse.com/regex-splitting-by-character-unless-in-quotes/
 					.forEach(x -> {
 						// create record
-						createLocalCallingRecord(x);
+						createLocalCallingRecord(x, localCallingRecords);
 						// write to file
 						writeLocalCallingRecords(processedFile, writer, x);
 					});
@@ -133,17 +119,17 @@ public class DataService {
 			e.printStackTrace();
 		}
 
-		log.debug("Total records: " + LOCAL_CALLING_RECORDS.size());
+		log.debug("Total records: " + localCallingRecords.size());
 
-		writeToCloud(LOCAL_CALLING_RECORDS, "localcalling");
+		writeToCloud(localCallingRecords, "localcalling");
 
 		return "Added!";
 	}
 
-	private void createLocalCallingRecord(String[] row) {
+	private void createLocalCallingRecord(final String[] row, final Map<String, LocalCalling> localcallingRecords) {
 		String key = row[5].trim() + "(" + row[6].trim() + "):" + row[11].trim() + "(" + row[12].trim() + ")";
 		LocalCalling value = getLocalCallingRecord(row);
-		LOCAL_CALLING_RECORDS.put(key, value);
+		localcallingRecords.put(key, value);
 	}
 
 	private void writeLocalCallingRecords(String processedFile, BufferedWriter writer, String[] row) {
@@ -282,13 +268,13 @@ public class DataService {
 		return record;
 	}
 
-	@GetMapping("/addTelusCanada")
-	public String addTelusCanada() throws InterruptedException, ExecutionException {
-		log.debug("Adding Telus Canada");
+	@GetMapping("/addCanadaCalling")
+	public String addCanadaCalling() throws InterruptedException, ExecutionException {
+		log.debug("Import Canada Calling Data to Cloud Firestore");
 
-		TELUS_CANADA_RECORDS.clear();
+		final Map<String, CanadaCalling> canadaCallingRecords = new HashMap<>();
 		// Checked already
-		String inputFile = System.getProperty("com.telus.lca.report.file.teluscanada");
+		String inputFile = System.getProperty("lca.report.file.canadacalling");
 
 		try (Stream<String> stream = Files.lines(Paths.get(inputFile), StandardCharsets.UTF_8)) {
 			stream.skip(1) // first line is the header -- skip
@@ -296,17 +282,17 @@ public class DataService {
 					.forEach(x -> {
 						// System.out.println(x.length);
 						String npanxx = x[28];
-						TelusCanada record = getTelusCanadaRecord(x);
-						if (!TELUS_CANADA_RECORDS.containsKey(npanxx)) {
-							TELUS_CANADA_RECORDS.put(npanxx, record);
+						CanadaCalling record = getCanadaCallingRecord(x);
+						if (!canadaCallingRecords.containsKey(npanxx)) {
+							canadaCallingRecords.put(npanxx, record);
 						} else {
-							TelusCanada currentRecord = TELUS_CANADA_RECORDS.get(npanxx);
+							CanadaCalling currentRecord = canadaCallingRecords.get(npanxx);
 							System.out.println("Find duplicate npanxx: " + npanxx);
 							System.out.println(
 									"Current has effective date: " + currentRecord.getCoc_effective_date_convert());
 							System.out.println("New date: " + x[2]);
 							if (currentRecord.getCoc_effective_date_convert().compareTo(x[2]) < 0) {
-								TELUS_CANADA_RECORDS.put(npanxx, record);
+								canadaCallingRecords.put(npanxx, record);
 								System.out.println("New date is used.");
 							}
 						}
@@ -316,19 +302,19 @@ public class DataService {
 			e.printStackTrace();
 		}
 
-		System.out.println("Total records after removing duplicates is: " + TELUS_CANADA_RECORDS.size());
+		System.out.println("Total records after removing duplicates is: " + canadaCallingRecords.size());
 
 		FirestoreOptions firestoreOptions = FirestoreOptions.getDefaultInstance().toBuilder().build();
 
 		try (Firestore db = firestoreOptions.getService();) {
 
 			// Convert all Map keys to a List
-			List<String> keyList = new ArrayList<>(TELUS_CANADA_RECORDS.keySet());
+			List<String> keyList = new ArrayList<>(canadaCallingRecords.keySet());
 
 			// Convert all Map values to a List
-			List<TelusCanada> valueList = new ArrayList<>(TELUS_CANADA_RECORDS.values());
+			List<CanadaCalling> valueList = new ArrayList<>(canadaCallingRecords.values());
 			int batchSize = 480;
-			int totalRecords = TELUS_CANADA_RECORDS.size();
+			int totalRecords = canadaCallingRecords.size();
 			int addedRecords = 0;
 			while (addedRecords < totalRecords) {
 				// Get a new write batch
@@ -393,17 +379,8 @@ public class DataService {
 		}
 
 		user.setTimestamp(Timestamp.now().toString());
-		// Use a service account
-		InputStream serviceAccount = new FileInputStream(
-				"C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json");
-		// "C:\\dev\\projects\\firestore\\service_account\\Users-c44a9454da63.json");
-		GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
-		FirebaseOptions options = new FirebaseOptions.Builder().setCredentials(credentials).build();
-		if (FirebaseApp.getApps().isEmpty()) {
-			FirebaseApp.initializeApp(options);
-		}
 
-		Firestore db = FirestoreClient.getFirestore();
+		Firestore db = getFirestore();
 		DocumentReference docRef = db.collection("users").document(user.getId());
 		// asynchronously write data
 		ApiFuture<WriteResult> result = docRef.set(user);
@@ -437,17 +414,7 @@ public class DataService {
 		}
 		updates.put("timestamp", Timestamp.now().toString());
 
-		// Use a service account
-		InputStream serviceAccount = new FileInputStream(
-				"C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json");
-		// "C:\\dev\\projects\\firestore\\service_account\\Users-c44a9454da63.json");
-		GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
-		FirebaseOptions options = new FirebaseOptions.Builder().setCredentials(credentials).build();
-		if (FirebaseApp.getApps().isEmpty()) {
-			FirebaseApp.initializeApp(options);
-		}
-
-		Firestore db = FirestoreClient.getFirestore();
+		Firestore db = getFirestore();
 		DocumentReference docRef = db.collection("users").document(user.getId());
 
 		// asynchronously write data
@@ -535,21 +502,22 @@ public class DataService {
 		}
 
 		String jsonPrettyOutput = new GsonBuilder().setPrettyPrinting().create().toJson(records);
-		String outputMessage  = null;
+		String outputMessage = null;
 		if (num == 0) {
 			outputMessage = "There is no such collection in Cloud Firestore: " + collection;
 		} else if (num == 1) {
-			outputMessage = "There is one document from collection of " + collection + System.lineSeparator() + jsonPrettyOutput;
+			outputMessage = "There is one document from collection of " + collection + System.lineSeparator()
+					+ jsonPrettyOutput;
 		} else if (num < 20) {
-			outputMessage = "There are " + num + " documents from collection of " + collection + System.lineSeparator() + jsonPrettyOutput;
+			outputMessage = "There are " + num + " documents from collection of " + collection + System.lineSeparator()
+					+ jsonPrettyOutput;
 		} else {
-			outputMessage = "Number of documents read from Cloud Firestore in Java structure: " 
-					+ num + System.lineSeparator()
-					+ "First 20: " + System.lineSeparator() + jsonPrettyOutput;
+			outputMessage = "Number of documents read from Cloud Firestore in Java structure: " + num
+					+ System.lineSeparator() + "First 20: " + System.lineSeparator() + jsonPrettyOutput;
 		}
 
 		log.debug(outputMessage);
-		
+
 		return outputMessage;
 	}
 
@@ -558,17 +526,7 @@ public class DataService {
 			throws IOException, InterruptedException, ExecutionException {
 		log.debug("Getting Data by ID from Cloud Firestore");
 
-		// Use a service account
-		InputStream serviceAccount = new FileInputStream(
-				"C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json");
-		// "C:\\dev\\projects\\firestore\\service_account\\Users-c44a9454da63.json");
-		GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
-		FirebaseOptions options = new FirebaseOptions.Builder().setCredentials(credentials).build();
-		if (FirebaseApp.getApps().isEmpty()) {
-			FirebaseApp.initializeApp(options);
-		}
-
-		Firestore db = FirestoreClient.getFirestore();
+		Firestore db = getFirestore();
 		ApiFuture<DocumentSnapshot> getResult = db.collection(collection).document(id).get();
 		DocumentSnapshot document = getResult.get();
 		if (document.exists()) {
@@ -582,17 +540,7 @@ public class DataService {
 	public String deleteUser(@PathVariable String id) throws IOException, InterruptedException, ExecutionException {
 		log.debug("Deleting Data from Cloud Firestore");
 
-		// Use a service account
-		InputStream serviceAccount = new FileInputStream(
-				"C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json");
-		// "C:\\dev\\projects\\firestore\\service_account\\Users-c44a9454da63.json");
-		GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
-		FirebaseOptions options = new FirebaseOptions.Builder().setCredentials(credentials).build();
-		if (FirebaseApp.getApps().isEmpty()) {
-			FirebaseApp.initializeApp(options);
-		}
-
-		Firestore db = FirestoreClient.getFirestore();
+		Firestore db = getFirestore();
 		ApiFuture<WriteResult> deleteResult = db.collection("users").document(id).delete();
 		return "Document Deleted Successfully at " + deleteResult.get().getUpdateTime() + ".";
 
@@ -604,17 +552,7 @@ public class DataService {
 			throws IOException, InterruptedException, ExecutionException {
 		log.debug("Deleting Data Field from Cloud Firestore");
 
-		// Use a service account
-		InputStream serviceAccount = new FileInputStream(
-				"C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json");
-		// "C:\\dev\\projects\\firestore\\service_account\\Users-c44a9454da63.json");
-		GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
-		FirebaseOptions options = new FirebaseOptions.Builder().setCredentials(credentials).build();
-		if (FirebaseApp.getApps().isEmpty()) {
-			FirebaseApp.initializeApp(options);
-		}
-
-		Firestore db = FirestoreClient.getFirestore();
+		Firestore db = getFirestore();
 		ApiFuture<WriteResult> updateResult = db.collection("users").document(doc)
 				.update(new HashMap<String, Object>() {
 					{
@@ -626,8 +564,8 @@ public class DataService {
 
 	}
 
-	private TelusCanada getTelusCanadaRecord(final String[] row) {
-		TelusCanada record = new TelusCanada();
+	private CanadaCalling getCanadaCallingRecord(final String[] row) {
+		CanadaCalling record = new CanadaCalling();
 
 		record.setTra_date(row[0]);
 		record.setCoc_lest_code(row[1]);
@@ -662,6 +600,26 @@ public class DataService {
 		record.setTpm_tpnt_code(row[30]);
 
 		return record;
+	}
+
+	private Firestore getFirestore() {
+		// old way:
+		// FirestoreOptions firestoreOptions =
+		// FirestoreOptions.getDefaultInstance().toBuilder().build();
+
+		// another way:
+		/*
+		 * // Use a service account InputStream serviceAccount = new FileInputStream(
+		 * "C:\\dev\\projects\\lca\\batch\\\\gcp_service_account\\Users-e0a6db6e4593.json"
+		 * ); GoogleCredentials credentials =
+		 * GoogleCredentials.fromStream(serviceAccount); FirebaseOptions options = new
+		 * FirebaseOptions.Builder().setCredentials(credentials).build(); if
+		 * (FirebaseApp.getApps().isEmpty()) { FirebaseApp.initializeApp(options); }
+		 * 
+		 * Firestore db = FirestoreClient.getFirestore();
+		 */
+		FirestoreOptions firestoreOptions = FirestoreOptions.getDefaultInstance();
+		return firestoreOptions.getService();
 	}
 
 }
