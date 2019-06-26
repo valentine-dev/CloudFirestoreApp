@@ -22,18 +22,15 @@ public class CloudFirestoreAppApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(CloudFirestoreAppApplication.class, args);
 
-		if (checkRequiredEnvironmentVariablesSetting() == false) {
-			System.exit(-1);
-		}
-		
+		checkRequiredEnvironmentVariablesSetting();
 	}
 
-	private static boolean checkRequiredEnvironmentVariablesSetting() {
+	private static void checkRequiredEnvironmentVariablesSetting() {
 		for (String env : requiredEnvVariables) {
 			log.debug("Checking whether " + env + " is set...");
 			if (System.getenv(env) == null) {
-				log.debug(env + " is not set.");
-				return false;
+				log.error(env + " is not set.");
+				System.exit(-1);
 			}
 			log.debug(env + " is set!");
 		}
@@ -44,7 +41,6 @@ public class CloudFirestoreAppApplication {
 		System.setProperty("com.telus.lca.report.file.localcalling", System.getenv("LCA_LOCAL_CALLING_REPORT_FILE"));
 		System.setProperty("com.telus.lca.report.file.teluscanada", System.getenv("LCA_TELUS_CANADA_REPORT_FILE"));
 		System.setProperty("com.telus.lca.lookup.file.localcalling", System.getenv("LCA_LOCAL_CALLING_LOOKUP_FILE"));
-		return true;
 	}
 
 }
